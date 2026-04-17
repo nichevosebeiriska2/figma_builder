@@ -1,6 +1,7 @@
 #include "api_utils.h"
 
 #include "curl.h"
+#include "global.h"
 #include "json_utils.h"
 #include "CLogger.h"
 
@@ -14,124 +15,26 @@
 #include <memory>
 #include <queue>
 
-const std::string g_strBaseURL = "https://api.figma.com/v1";
-
-// curl write callback
-static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
-	size_t total_size = size * nmemb;
-	userp->append((char*)contents, total_size);
-	return total_size;
-}
 
 
-size_t ImageWriteCallback(void* ptr, size_t size, size_t nmemb, void* userdata) 
-{	
-	std::string strPath{ (const char*)userdata };
-	std::ofstream file((const char*)userdata, std::ios::binary);
-
-	if (file.is_open())
+struct SLinksDownloadTask
+{
+	struct SFigmaApiResponse
 	{
-		const char* p_image = (const char*)ptr;
-		file.write(p_image, nmemb);
+		rj::Document docResponse;
+		int iReturnCode = 0;
 
-		return nmemb;
-	}
+		SFigmaApiResponse() = default;
+		SFigmaApiResponse(const std::string& strResponse)
+		{
+			docResponse.Parse(strResponse.c_str());
 
-	return 0;
-}
-
-
-std::string FormIdsStringFromContainer(const auto& container)
-{
-	std::string str_ids = "?ids=";
-
-	for (const auto& [id_local, id_global] : container)
-		str_ids += std::to_string(id_local) + ":" + std::to_string(id_global) + ",";
-
-	str_ids.pop_back();
-
-	return str_ids;
-}
+			if (docResponse.HasMember("err") && !docResponse["err"].IsNull())
+				iReturnCode = docResponse["status"].GetInt();
+		}
+	};
 
 
-std::string FormFormat(EImageFormat eFmt)
-{
-	std::string str_format = "format=";
-	switch (eFmt)
-	{
-		case(EImageFormatJPG):
-			return str_format + "jpg";
-		case(EImageFormatPNG):
-			return str_format + "png";
-		case(EImageFormatSVG):
-			return str_format + "svg";
-	}
-
-	return "";
-}
-
-
-std::string FormScale(float scale)
-{
-	return std::string{ "scale=" } + std::to_string(scale);
-}
-
-
-std::string FormContentOnly()
-{
-	return "contents_only=true";
-}
-
-
-std::string CreateRequestHeader()
-{
-	return std::string{ "X-Figma-Token: " } + GetAccessToken();
-}
-
-
-CURL* CreateHandleToRequestImages(std::set<IDs> setIds, float scale, std::string& strBuffer)
-{
-	const std::string strIdsSequence = FormIdsStringFromContainer(setIds);
-
-	struct curl_slist* headers = nullptr;
-	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
-
-	std::string str_url = g_strBaseURL + "/images/" + GetFileDescriptor() + FormIdsStringFromContainer(setIds) + "&" + FormScale(scale) + "&" + FormFormat(EImageFormatPNG);
-
-	CURL* curl = curl_easy_init();
-
-	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &strBuffer);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-	//curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
-	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-	return curl;
-}
-
-
-struct SFigmaApiResponse
-{
-	rj::Document docResponse;
-	int iReturnCode = 0;
-
-	SFigmaApiResponse() = default;
-	SFigmaApiResponse(const std::string& strResponse)
-	{
-		docResponse.Parse(strResponse.c_str());
-
-		if (docResponse.HasMember("err") && !docResponse["err"].IsNull())
-			iReturnCode = docResponse["status"].GetInt();
-	}
-};
-
-
-struct SImageDownloadTask
-{
 	float scale;
 	std::set<IDs> idsSet;
 	SFigmaApiResponse apiResp;
@@ -144,8 +47,93 @@ struct SImageDownloadTask
 	}
 };
 
+std::string CreateRequestHeader()
+{
+	return std::string{ "X-Figma-Token: " } + GetAccessToken();
+}//CreateRequestHeader()
 
-bool AsyncRequestDownloadTasks(const std::list<SImageDownloadTask>& tasks)
+
+// curl write callback
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
+	size_t total_size = size * nmemb;
+	userp->append((char*)contents, total_size);
+	return total_size;
+}//WriteCallback()
+
+
+CURL* CurlCreateEasyHandle(const std::string& strUrl, SHttpResponseData& sResponse)
+{
+	struct curl_slist* headers = nullptr;
+	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
+
+	CURL* curl = curl_easy_init();
+
+	curl_easy_setopt(curl, CURLOPT_URL, strUrl.c_str());
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sResponse);
+
+	return curl;
+}//CurlCreateEasyHandle()
+
+
+size_t ImageWriteCallback(void* ptr, size_t size, size_t nmemb, void* userdata) 
+{	
+	std::ofstream file((const char*)userdata, std::ios::binary);
+
+	if (file.is_open())
+	{
+		const char* p_image = (const char*)ptr;
+		file.write(p_image, nmemb);
+
+		return nmemb;
+	}
+
+	return 0; // curl handles zero as error
+}//ImageWriteCallback()
+
+
+
+std::string FormIdsStringFromContainer(const auto& container)
+{
+	std::string str_ids = "?ids=";
+
+	for (const auto& [id_local, id_global] : container)
+		str_ids += std::to_string(id_local) + ":" + std::to_string(id_global) + ",";
+
+	str_ids.pop_back();
+
+	return str_ids;
+}//FormIdsStringFromContainer()
+
+
+// creates CURL* handle to request set of images with specific scale
+CURL* CurlCreateHandleToRequestImages(std::set<IDs> setIds, float scale, std::string& strBuffer)
+{
+	const std::string strIdsSequence = FormIdsStringFromContainer(setIds);
+
+	struct curl_slist* headers = nullptr;
+	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
+
+	std::string str_url = g_strBaseFigmaApiURL + "/images/" + GetFileDescriptor() + FormIdsStringFromContainer(setIds) + "&" + std::format("scale={}", scale) + "&format=png";
+
+	CURL* curl = curl_easy_init();
+
+	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &strBuffer);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+	return curl;
+}//CreateHandleToRequestImages()
+
+
+
+bool AsyncRequestDownloadTasks(const std::list<SLinksDownloadTask>& tasks)
 {
 	CURLM* multi = curl_multi_init();
 	if (!multi)
@@ -158,13 +146,13 @@ bool AsyncRequestDownloadTasks(const std::list<SImageDownloadTask>& tasks)
 	do {
 		CURLMcode mc = curl_multi_perform(multi, &still_running);
 		if (mc != CURLM_OK)
-			break;
+			return false;
 
 		int numfds = 0;
 		mc = curl_multi_poll(multi, nullptr, 0, 1000, &numfds);
 
 		if (mc != CURLM_OK)
-			break;
+			return false;
 
 	} while (still_running);
 
@@ -176,23 +164,23 @@ bool AsyncRequestDownloadTasks(const std::list<SImageDownloadTask>& tasks)
 
 std::map<float, std::vector<rj::Document>> RequestImageLinksAsync(std::map<float, std::set<IDs>> mapScaleIds, std::map<float, std::vector<SHttpResponseData>>& responses)
 {
-	std::list<SImageDownloadTask> tasks; // нужен контейнер без переаллокации! иначе указатель на строку с которым создается хендл будет невалидным
+	std::list<SLinksDownloadTask> tasks; // нужен контейнер без переаллокации! иначе указатель на строку с которым создается хендл будет невалидным
 
 	std::string strBuffer;
 	for (auto [scale, setIDs] : mapScaleIds)
 	{
-		auto it = setIDs.begin();
-		auto it_second = it;
-		while (it != setIDs.end()) // sharding tasks to subtask with max size = g_iNumOfImagesPerRequest
+		auto itRangeIdsFirst = setIDs.begin();
+		auto itRangeIdsSecond = itRangeIdsFirst;
+		while (itRangeIdsFirst != setIDs.end()) // sharding tasks to subtask with max size = g_iNumOfImagesPerRequest
 		{
 			// как будто можно найти контейнер получше чтобы не инкрементировать в цикле.
-			while (std::distance(it, it_second) < g_iNumOfImagesPerRequest && it_second != setIDs.end())
-				it_second++;
+			while (std::distance(itRangeIdsFirst, itRangeIdsSecond) < g_iNumOfImagesPerRequest && itRangeIdsSecond != setIDs.end())
+				itRangeIdsSecond++;
 			
-			tasks.emplace_back(SImageDownloadTask{ scale, std::set(it, it_second) });
-			tasks.back().handle = CreateHandleToRequestImages(tasks.back().idsSet, scale, tasks.back().strResponseBuffer);
+			tasks.emplace_back(SLinksDownloadTask{ scale, std::set(itRangeIdsFirst, itRangeIdsSecond) });
+			tasks.back().handle = CurlCreateHandleToRequestImages(tasks.back().idsSet, scale, tasks.back().strResponseBuffer);
 			
-			it = it_second;
+			itRangeIdsFirst = itRangeIdsSecond;
 		}
 	}
 
@@ -211,25 +199,45 @@ std::map<float, std::vector<rj::Document>> RequestImageLinksAsync(std::map<float
 			std::this_thread::sleep_for(std::chrono::seconds{ iSleepTimeSec });
 		}
 
-		AsyncRequestDownloadTasks(tasks);
+		if (!AsyncRequestDownloadTasks(tasks))
+		{
+			Logger::Error("RequestImageLinksAsync() - fatal curl error");
+			std::terminate();
+		}
 
-		std::list<SImageDownloadTask> tasks_retry;
+		std::list<SLinksDownloadTask> tasks_retry;
 		for (auto& task : tasks)
 		{
 			task.ParseFromBuffer();
 			
 			const int iRetCode = task.apiResp.iReturnCode;
-			if (iRetCode == 0)
-				mapResult[task.scale].emplace_back(std::move(task.apiResp.docResponse));
-			
-			else if (iRetCode == 429) // rejected due to access limits
+			switch (iRetCode)
 			{
-				tasks_retry.emplace_back(SImageDownloadTask{ task.scale, std::move(task.idsSet) });
-				tasks_retry.back().handle = CreateHandleToRequestImages(tasks.back().idsSet, task.scale, tasks_retry.back().strResponseBuffer);
+				case(0):
+				{
+					mapResult[task.scale].emplace_back(std::move(task.apiResp.docResponse));
+					break;
+				}
+				case(400):// fatal errors - 400 - invalid file descriptor, 404 - invalid parameters, 500 - internal server render error
+				case(404):
+				case(500):
+				{
+					Logger::Error(std::format("API returned error code '{}'\n\t\t with error : '{}", iRetCode, task.strResponseBuffer));
+					Logger::Error("FATAL ERROR");
+					std::terminate(); // clearly something went wrong. no reason to continue
+				}
+				case(429):
+				{
+					tasks_retry.emplace_back(SLinksDownloadTask{ task.scale, std::move(task.idsSet) });
+					tasks_retry.back().handle = CurlCreateHandleToRequestImages(tasks.back().idsSet, task.scale, tasks_retry.back().strResponseBuffer);
+					break;
+				}
 			}
-			else
-				Logger::Error(std::format("API returned error code '{}'\n\t\t with error : '{}", iRetCode, task.strResponseBuffer));
-			
+		}
+
+		if (tasks.size() == tasks_retry.size())
+		{
+			//iCountRetries--;
 		}
 
 		std::swap(tasks, tasks_retry);
@@ -240,94 +248,127 @@ std::map<float, std::vector<rj::Document>> RequestImageLinksAsync(std::map<float
 }
 
 
-SHttpResponseData CurlGetImage(TVecIDs ids, float scale, bool bContentOnly)
+rj::Document CurlGetFile()
 {
 	SHttpResponseData response;
 	struct curl_slist* headers = nullptr;
 	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
 
-	std::string str_url = g_strBaseURL + "/images/" + GetFileDescriptor() + FormIdsStringFromContainer(ids) + "&" + FormScale(scale) + "&" + FormFormat(EImageFormatPNG);
+	std::string str_url = g_strBaseFigmaApiURL + "/files/" + GetFileDescriptor();
 
-	if (bContentOnly)
-		str_url += "&" + FormContentOnly();
+	CURL* curl = CurlCreateEasyHandle(str_url, response);
 
-	CURL* curl = curl_easy_init();
+	if (!curl || curl_easy_perform(curl))
+		Logger::Error("CurlGetfile() - curl error");
 
-	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+	curl_easy_cleanup(curl);
 
-	CURLcode res = curl_easy_perform(curl);
+	rj::Document doc;
+	doc.Parse(response.body.c_str());
 
-	return response;
-}
+	if (doc.IsNull() || doc.HasParseError())
+	{
+		Logger::Error("Fatal error - failed to get meta info for project");
+		std::terminate();
+	}
+
+	return doc;
+}//CurlGetFile()
 
 
-SHttpResponseData CurlGetNode(TVecIDs ids)
+SHttpResponseData CurlGetFileInfo(const std::string& strFileDescriptor)
 {
 	SHttpResponseData response;
 	struct curl_slist* headers = nullptr;
 	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
 
-	std::string str_url = g_strBaseURL + "/files/" + GetFileDescriptor() + FormIdsStringFromContainer(ids);
+	std::string str_url = g_strBaseFigmaApiURL + "/files/" + strFileDescriptor + "?depth=1";
 
-	CURL* curl = curl_easy_init();
+	CURL* curl = CurlCreateEasyHandle(str_url, response);
 
-	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+	if (!curl || curl_easy_perform(curl))
+		Logger::Error("Failed to get file with curl");
 
-	CURLcode res = curl_easy_perform(curl);
-
+	curl_easy_cleanup(curl);
 	return response;
 }
 
+rj::Document CurlGetFileInfoAsJsonDocument()
+{
+	const SHttpResponseData sResponce = CurlGetFileInfo(GetFileDescriptor());
+	
+	if (sResponce.status_code)
+	{
+		Logger::Error(std::format("Error : CurlGetFileInfoAsJsonDocument() : http return code {}", sResponce.status_code));
+		return rj::Document(rj::kNullType);
+	}
 
-SHttpResponseData CurlGetFile()
+	rj::Document doc;
+	doc.Parse(sResponce.body.c_str());
+
+	if (doc.IsNull() || doc.HasParseError())
+	{
+		Logger::Error("Fatal error - failed to get meta info for project");
+		std::terminate();
+	}
+
+	return doc;
+}
+
+rj::Document CurlGetLibraryInfoAsJsonDocument()
+{
+	const SHttpResponseData sResponce = CurlGetFileInfo(GetLibraryFileDescriptor());
+
+	if (sResponce.status_code)
+	{
+		Logger::Error(std::format("Error : CurlGetLibraryInfoAsJsonDocument() : http return code {}", sResponce.status_code));
+		return rj::Document(rj::kNullType);
+	}
+
+	rj::Document doc;
+	doc.Parse(sResponce.body.c_str());
+
+	if (doc.IsNull() || doc.HasParseError())
+	{
+		Logger::Error("Fatal error - failed to get meta info for project");
+		std::terminate();
+	}
+
+	return doc;
+}
+
+
+rj::Document CurlGetLibraryFile()
 {
 	SHttpResponseData response;
 	struct curl_slist* headers = nullptr;
 	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
 
-	std::string str_url = g_strBaseURL + "/files/" + GetFileDescriptor();
+	std::string str_url = g_strBaseFigmaApiURL + "/files/" + GetLibraryFileDescriptor();
 
-	CURL* curl = curl_easy_init();
+	CURL* curl = CurlCreateEasyHandle(str_url, response);
 
-	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-	CURLcode res = curl_easy_perform(curl);
-
-	return response;
-}
+	if (!curl || curl_easy_perform(curl))
+		Logger::Error("CurlGetLibraryFile() - curl error");
 
 
-SHttpResponseData CurlGetFileInfo()
-{
-	SHttpResponseData response;
-	struct curl_slist* headers = nullptr;
-	headers = curl_slist_append(headers, CreateRequestHeader().c_str());
+	curl_easy_cleanup(curl);
+	
+	rj::Document doc;
 
-	std::string str_url = g_strBaseURL + "/files/" + GetFileDescriptor() + "?depth=1";
+	doc.Parse(response.body.c_str());
 
-	CURL* curl = curl_easy_init();
+	if (doc.IsNull() || doc.HasParseError())
+	{
+		Logger::Error("Fatal error - failed to get meta info for project");
+		std::terminate();
+	}
 
-	curl_easy_setopt(curl, CURLOPT_URL, str_url.c_str());
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-	CURLcode res = curl_easy_perform(curl);
-
-	return response;
-}
+	return doc;
+}//CurlGetLibraryFile()
 
 
-bool CurlDownloadImagesAsync(const std::vector<DownloadTask>& tasks)
+bool CurlDownloadImagesAsync(const std::vector<SDownloadTask>& tasks)
 {
 	CURLM* multi = curl_multi_init();
 	if (!multi)
@@ -399,49 +440,8 @@ bool CurlDownloadImagesAsync(const std::vector<DownloadTask>& tasks)
 	curl_multi_cleanup(multi);
 
 	return true;
-}
+}//CurlDownloadImagesAsync()
 
-
-bool CurlDownloadImage(std::filesystem::path pathToElement, std::string strImageURL)
-{
-	CURL* curl = curl_easy_init();
-
-	std::string strPathToOutputFile = pathToElement.generic_string();
-
-	if (!std::filesystem::exists(pathToElement.parent_path()))
-		std::filesystem::create_directories(pathToElement.parent_path());
-
-	SHttpResponseData res;
-
-	if (curl) {
-		curl_easy_setopt(curl, CURLOPT_URL, strImageURL.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ImageWriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, strPathToOutputFile.c_str());
-		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return res == CURLE_OK;
-	}
-
-	return false;
-}
-
-
-SApiResponse GetApiResponse(SHttpResponseData& response)
-{
-	rj::Document doc;
-	doc.Parse(response.body.c_str());
-
-	SApiResponse figApiResp;
-
-	if(doc.HasMember("status"))
-		return { doc["status"].GetInt(), doc["err"].GetString() };
-	
-	return { 0 };
-}
 
 // element can have pair of ids if format : "id1:id2" or two pairs : "local_id1:local_id2";"id1:id2"
 // we need id1 id2 only to request image/node
@@ -456,4 +456,4 @@ IDs GetElementIDs(std::string strIDs)
 	std::string strIdSecond = strIDs.substr(iPos + 1, strIDs.length() - iPos - 1);
 
 	return IDs{ std::atoi(strIdFirst.c_str()) , std::atoi(strIdSecond.c_str()) };
-}
+}//GetElementIDs()

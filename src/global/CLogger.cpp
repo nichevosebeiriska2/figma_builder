@@ -39,7 +39,7 @@ void Logger::LogImpl(const std::string& strMessage, unsigned int iStep, ETextTyp
 	if (iStep)
 		m_instance->m_file << std::string(iStep, '\t');
 
-	std::osyncstream{ std::cout } << s_mapColors[eType] << (iStep ? (std::string(iStep, '\t') + strMessage) : strMessage) << s_mapColors[ETextTypeDefault] <<std::endl;
+	std::osyncstream{ std::cerr } << s_mapColors[eType] << (iStep ? (std::string(iStep, '\t') + strMessage) : strMessage) << s_mapColors[ETextTypeDefault] <<std::endl;
 	std::osyncstream{ m_instance->m_file } << strMessage << std::endl;
 }//Logger::LogImpl()
 

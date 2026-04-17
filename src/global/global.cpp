@@ -4,11 +4,12 @@
 #include "global.h"
 #include "document.h"
 
-static std::filesystem::path g_pathWorkingDirectory = std::filesystem::current_path();
-static std::filesystem::path g_pathOutputDirectory = std::filesystem::current_path();
+static std::filesystem::path g_pathWorkingDirectory{};
+static std::filesystem::path g_pathOutputDirectory{};
 
 static std::string g_strAccessToken = "";
 static std::string g_strFileDescriptor = "";
+static std::string g_strLibraryFileDescriptor = "";
 static std::string g_strCloneName = "";
 
 
@@ -44,7 +45,8 @@ std::string ToString(ENodeType eType)
 	};
 
 	return s_mapTypeNamesTypeName.contains(eType) ? s_mapTypeNamesTypeName[eType] : "";
-}
+}//ToString()
+
 
 ENodeType StringToNodeType(const std::string& str)
 {
@@ -78,7 +80,7 @@ ENodeType StringToNodeType(const std::string& str)
 	};
 
 	return s_mapTypeNamesNameType.contains(str) ? s_mapTypeNamesNameType[str] : _UNKNOWN;
-}
+}//StringToNodeType()
 
 
 ESliceFormat StringToSliceFormat(const std::string& str)
@@ -96,42 +98,44 @@ ESliceFormat StringToSliceFormat(const std::string& str)
 	};
 
 	return s_mapFormats.contains(str) ? s_mapFormats[str] : ESliceFormat_Unknown;
-}
+}//StringToSliceFormat()
 
 
 std::filesystem::path GetWorkingDirectory()
 {
 	return g_pathWorkingDirectory;
-}
+}//GetWorkingDirectory()
 
 
 std::filesystem::path GetCacheDirectory()
 {
 	return GetWorkingDirectory() / "cache";
-}
+}//GetCacheDirectory()
 
 
 std::filesystem::path GetConfigFilePath()
 {
 	return (GetWorkingDirectory() / g_strConfigFileName).replace_extension("txt");
-}
+}//GetConfigFilePath()
 
 
 std::filesystem::path GetElementsCacheDirectory()
 {
 	return GetWorkingDirectory() / "cache/elements";
-}
+}//GetElementsCacheDirectory()
 
 
 std::filesystem::path GetImagesCacheDirectory()
 {
 	return GetWorkingDirectory() / "cache/images";
-}
+}//GetImagesCacheDirectory()
+
 
 std::filesystem::path GetOutputDirectory()
 {
 	return g_pathOutputDirectory;
-}
+}//GetOutputDirectory()
+
 
 std::string NormalizeElementName(const std::string& strElementName)
 {
@@ -143,7 +147,8 @@ std::string NormalizeElementName(const std::string& strElementName)
 		return strResult.erase(pos, strlen("_3x3"));
 
 	return strResult;
-}
+}//NormalizeElementName()
+
 
 std::filesystem::path CreateOutputImagePath(const std::string& strElementName, const std::string& strSuffix, const float scale, const std::string& strFormat)
 {
@@ -151,7 +156,8 @@ std::filesystem::path CreateOutputImagePath(const std::string& strElementName, c
 
 	auto strOutputName = strNormalizedName + strSuffix + (scale != 1.0f ? std::format("@{}x", scale) : "") + strFormat;
 	return GetOutputDirectory() / strOutputName;
-}
+}//CreateOutputImagePath()
+
 
 void SetOutputDirectory(std::filesystem::path path)
 {
@@ -159,58 +165,74 @@ void SetOutputDirectory(std::filesystem::path path)
 		std::filesystem::create_directories(path);
 
 	g_pathOutputDirectory = path;
-}
+}//SetOutputDirectory()
+
 
 void SetWorkingDirectory(std::filesystem::path path)
 {
 	g_pathWorkingDirectory = path;
-}
+}//SetWorkingDirectory()
 
 
 std::string GetAccessToken()
 {
 	return g_strAccessToken;
-}
+}//GetAccessToken()
 
 
-bool IsRegExValid(const std::string& strRegEx)
+std::regex TryCreateRegex(const std::string& strRegEx, bool& bSuccess)
 {
 	try
 	{
-		std::regex(strRegEx);
+		return std::regex(strRegEx);
 	}
 	catch (std::regex_error) // if strRegEx contains invalid expession std::regex_error thrown
 	{
-		return false;
+		bSuccess = false;
 	}
 
-	return true;
-}
+	return {};
+}//TryCreateRegex()
 
 void SetAccessToken(std::string strToken)
 {
 	g_strAccessToken = strToken;
-}
+}//SetAccessToken()
 
 
 std::string GetFileDescriptor()
 {
 	return g_strFileDescriptor;
-}
+}//GetFileDescriptor()
+
+
+std::string GetLibraryFileDescriptor()
+{
+	return g_strLibraryFileDescriptor;
+}//GetLibraryFileDescriptor()
+
 
 void SetFileDescriptor(std::string strDesc)
 {
 	g_strFileDescriptor = strDesc;
-}
+}//SetFileDescriptor()
 
-ShadowBorder::ShadowBorder(float left, float top, float right, float bottom)
-	: m_fLeft{ left }
-	, m_fTop{ top }
-	, m_fRight{ right }
-	, m_fBottom{ bottom }
+
+void SetFileLibraryDescriptor(std::string strDesc)
+{
+	g_strLibraryFileDescriptor = strDesc;
+}//SetFileLibraryDescriptor()
+
+
+ShadowBorder::ShadowBorder(float fLeft, float fTop, float fRight, float fBottom)
+	: m_fLeft{ fLeft }
+	, m_fTop{ fTop }
+	, m_fRight{ fRight }
+	, m_fBottom{ fBottom }
 {
 
 }//ShadowBorder::ShadowBorder()
+
 
 ShadowBorder::ShadowBorder(float f)
 	: ShadowBorder(f,f,f,f)
@@ -237,7 +259,7 @@ ShadowBorder& ShadowBorder::operator+=(float f)
 	m_fBottom += f;
 
 	return *this;
-}//ShadowBorder::operator+=
+}//ShadowBorder::operator+=()
 
 
 bool operator<(const ShadowBorder& left, const ShadowBorder& right)
@@ -246,7 +268,7 @@ bool operator<(const ShadowBorder& left, const ShadowBorder& right)
 		|| left.m_fTop < right.m_fTop
 		|| left.m_fRight < right.m_fRight
 		|| left.m_fBottom < right.m_fBottom;
-}
+}//operator<()
 
 
 ShadowBorder operator-(const ShadowBorder& left, const ShadowBorder& right)
@@ -284,7 +306,8 @@ ShadowBorder MaxBorder(const std::vector<ShadowBorder>& vecBorders)
 	}
 
 	return result;
-}
+}//MaxBorder()
+
 
 ShadowBorder CalcShadowBorderForElement(const rapidjson::Value& json)
 {
@@ -332,4 +355,19 @@ ShadowBorder CalcShadowBorderForElement(const rapidjson::Value& json)
 	}
 
 	return MaxBorder({ MaxBorder(vecDropShadows),MaxBorder(vecOutsideStrokes) });
-}
+}//CalcShadowBorderForElement()
+
+
+bool CheckElementHasGradient(rapidjson::Value& element_json)
+{
+	if (!element_json.HasMember("fills"))
+		return false;
+
+	const rapidjson::Value& arrFills = element_json["fills"].GetArray();
+
+	for (auto it = arrFills.Begin(); it != arrFills.End(); it++)
+		if (it->HasMember("type") && std::string{ (*it)["type"].GetString() } != std::string{ "SOLID" } && it->HasMember("visible") && (*it)["visible"].GetBool())
+			return true;
+
+	return false;
+}//CheckElementHasGradient()

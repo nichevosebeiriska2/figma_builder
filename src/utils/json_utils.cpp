@@ -34,6 +34,16 @@ void SaveJsonToFileFast(const rj::Value& doc, std::filesystem::path path)
 }
 
 
+std::string JsonToString(const rj::Value& value)
+{
+	StringBuffer buffer;
+	Writer<StringBuffer> writer(buffer);
+	value.Accept(writer);
+	
+	return buffer.GetString();
+}
+
+
 void SaveJsonToFile(const rj::Value& doc, std::filesystem::path path)
 {
 	using namespace rj;
@@ -85,65 +95,59 @@ rj::Document LoadJsonFromFile(std::filesystem::path path)
 }
 
 
-std::optional<TVecFloat> ParseJsonArrayAsFloats(const rj::Value& valArray)
+bool ParseJsonArrayAsFloats(const rj::Value& valArray, TVecFloat& vecResult)
 {
 	if (!valArray.IsArray())
-		return std::nullopt;
-
-	TVecFloat result;
+		return false;
 
 	for (auto it = valArray.Begin(); it != valArray.End(); it++)
 	{
 		if (!it->IsFloat())
-			return std::nullopt;
+			return false;
 
-		result.emplace_back(it->GetFloat());
+		vecResult.emplace_back(it->GetFloat());
 	}
 
-	return result;
+	return true;
 }
 
 
-std::optional<TVecInts> ParseJsonArrayAsInts(const rj::Value& valArray)
+bool ParseJsonArrayAsInts(const rj::Value& valArray, TVecInts& vecResult)
 {
 	if (!valArray.IsArray())
-		return std::nullopt;
-
-	TVecInts result;
+		return false;
 
 	for (auto it = valArray.Begin(); it != valArray.End(); it++)
 	{
 		if (!it->IsInt())
-			return std::nullopt;
+			return false;
 
-		result.emplace_back(it->GetInt());
+		vecResult.emplace_back(it->GetInt());
 	}
 
-	return result;
+	return true;
 }
 
 
 
-std::optional<TVecStr> ParseJsonArrayAsStrings(const rj::Value& valArray)
+bool ParseJsonArrayAsStrings(const rj::Value& valArray, TVecStr& vecResult)
 {
 	if (!valArray.IsArray())
-		return std::nullopt;
-
-	TVecStr result;
+		return false;
 
 	for (auto it = valArray.Begin(); it != valArray.End(); it++)
 	{
 		if (!it->IsString())
-			return std::nullopt;
+			return false;
 
-		result.emplace_back(it->GetString());
+		vecResult.emplace_back(it->GetString());
 	}
 
-	return result;
+	return true;
 }
 
 
-void findNodesByNameAndType(const Value& node, const std::string& key, const std::string& value, std::vector<Value*>& results) {
+void FindNodesByNameAndType(const Value& node, const std::string& key, const std::string& value, TVecValuePtrs& results) {
 
 	if (node.IsObject()) {
 		if (node.HasMember(key.c_str()) && node[key.c_str()].IsString())
@@ -151,61 +155,98 @@ void findNodesByNameAndType(const Value& node, const std::string& key, const std
 				results.push_back(&const_cast<Value&>(node[key.c_str()]));
 
 		for (auto it = node.MemberBegin(); it != node.MemberEnd(); it++)
-			findNodesByNameAndType(it->value, key, value, results);
+			FindNodesByNameAndType(it->value, key, value, results);
 
 	}
 	else if (node.IsArray())
 		for (auto it = node.Begin(); it != node.End(); it++)
-			findNodesByNameAndType(*it, key, value, results);
+			FindNodesByNameAndType(*it, key, value, results);
 
 }
 
 
-void findNodesByNameAndType(const rj::Value& node, const std::string& name, ENodeType eType, std::vector<rj::Value*>& results)
+void FindNodesByNameAndType(const rj::Value& valueNode, const std::string& name, ENodeType eType, TVecValuePtrs& results)
 {
-	if (node.IsObject()) {
-		if (node.HasMember("name") && node["name"].IsString() && node.HasMember("type") && node["type"].IsString())
-		{
-			if (std::string{ node["name"].GetString() } == name && std::string{ node["type"].GetString() } == ToString(eType))
-				results.push_back(&const_cast<Value&>(node));
+	if (valueNode.IsObject()) {
+		if (valueNode.HasMember("name") && valueNode.HasMember("type") && valueNode["name"].GetString() == name && valueNode["type"].GetString() == ToString(eType))
+			results.push_back(&const_cast<Value&>(valueNode));
 
-		}
-			
-
-		for (auto it = node.MemberBegin(); it != node.MemberEnd(); it++)
-			findNodesByNameAndType(it->value, name, eType, results);
+		for (auto it = valueNode.MemberBegin(); it != valueNode.MemberEnd(); it++)
+			FindNodesByNameAndType(it->value, name, eType, results);
 
 	}
-	else if (node.IsArray())
-		for (auto it = node.Begin(); it != node.End(); it++)
-			findNodesByNameAndType(*it, name, eType, results);
+	else if (valueNode.IsArray())
+		for (auto it = valueNode.Begin(); it != valueNode.End(); it++)
+			FindNodesByNameAndType(*it, name, eType, results);
 }
 
 
-bool IsNodeGraphicalElement(const rj::Value& node)
+void FindNodesByNameAndType(const rj::Value& valueNode, const TVecStr& vecStrNames, ENodeType eType, TVecValuePtrs& results)
 {
-	if (!node.HasMember("type") || (node.HasMember("visible") && node["visible"].GetBool() == false))
+	if (valueNode.IsObject()) {
+	{
+		bool bNodeFinded = valueNode.HasMember("name") 
+			&& valueNode.HasMember("type")
+			&& valueNode["type"].GetString() == ToString(eType)
+			&& std::ranges::find(vecStrNames, valueNode["name"].GetString()) != vecStrNames.end();
+		if (bNodeFinded)
+			results.push_back(&const_cast<Value&>(valueNode));
+	}
+
+
+		for (auto it = valueNode.MemberBegin(); it != valueNode.MemberEnd(); it++)
+			FindNodesByNameAndType(it->value, vecStrNames, eType, results);
+
+	}
+	else if (valueNode.IsArray())
+		for (auto it = valueNode.Begin(); it != valueNode.End(); it++)
+			FindNodesByNameAndType(*it, vecStrNames, eType, results);
+}
+
+void findNodesByType(const TValue& valueNode, ENodeType eType, TVecValuePtrs& results)
+{
+	if (valueNode.IsObject()) {
+ 		if (valueNode.HasMember("type") && StringToNodeType(valueNode["type"].GetString()) == eType)
+			results.push_back(&valueNode);
+
+
+		for (auto it = valueNode.MemberBegin(); it != valueNode.MemberEnd(); it++)
+			findNodesByType(it->value, eType, results);
+
+	}
+	else if (valueNode.IsArray())
+		for (auto it = valueNode.Begin(); it != valueNode.End(); it++)
+			findNodesByType(*it, eType, results);
+}
+
+
+bool IsNodeGraphicalElement(const rj::Value& valueNode)
+{
+	if (!valueNode.HasMember("type") || (valueNode.HasMember("visible") && valueNode["visible"].GetBool() == false))
 		return false;
 
-	const std::string strType = node["type"].GetString();
+	const ENodeType eType = StringToNodeType(valueNode["type"].GetString());
 
-	return (strType == "RECTANGLE" || strType == "VECTOR" || strType == "ELLIPSE" || strType == "BOOLEAN_OPERATION" || strType == "SLICE" || strType == "FRAME");
+	return eType == RECTANGLE || eType == VECTOR || eType == ELLIPSE || eType == BOOLEAN_OPERATION || eType == SLICE || eType == FRAME;
 }
 
 
-void findElementNodesFromExportDev(const rj::Value& node_export_dev, std::vector<const rj::Value*>& results)
+void FindElementsFromComponents(const rj::Value& node_export_dev, TVecValuePtrs& results)
 {
-	auto children = node_export_dev["children"].GetArray();
+	const TValue& children = node_export_dev["children"].GetArray();
 
 	for (auto it = children.Begin(); it != children.End(); it++)
 	{
-		if (!it->IsObject())
+		const TValue& valueNode = *it;
+
+		if (!valueNode.IsObject())
 			continue;
 
-		if (IsNodeGraphicalElement(*it))
-			results.emplace_back(&(*it));
+		if (IsNodeGraphicalElement(valueNode)) // collect each visible element with allowed type
+			results.emplace_back(&valueNode);
 
-		if (it->HasMember("children") && std::string{ (*it)["type"].GetString() } != std::string{ "INSTANCE" })
-			findElementNodesFromExportDev(*it, results);
+		// if non-instance element has children and visible find elements within
+		if (valueNode.HasMember("children") && StringToNodeType(valueNode["type"].GetString()) != INSTANCE && (!valueNode.HasMember("visible") || !valueNode["visible"].GetBool()))
+			FindElementsFromComponents(valueNode, results);
 	}
 }

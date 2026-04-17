@@ -21,7 +21,7 @@ ShadowBorder CImporter::GetReportHeaderSizes(rj::Value& element_json)
 }
 
 
-StbImage CImporter::StretchToExpectedSize(rj::Value& element_json, StbImage& image, ShadowBorder sBorder, float scale)
+SStbImage CImporter::StretchToExpectedSize(rj::Value& element_json, SStbImage& image, ShadowBorder sBorder, float scale)
 {
 	const ShadowBorder sBorderOwn = sBorder * scale;
 	const ShadowBorder sBorderEffects = CalcShadowBorderForElement(element_json) * scale;
@@ -38,23 +38,23 @@ StbImage CImporter::StretchToExpectedSize(rj::Value& element_json, StbImage& ima
 }
 
 
-bool CheckElementHasGradient(rj::Value& element_json)
-{
-	if (!element_json.HasMember("fills"))
-		return false;
-
-	const rj::Value& arrFills = element_json["fills"].GetArray();
-
-	for (auto it = arrFills.Begin(); it != arrFills.End(); it++)
-		if (it->HasMember("type") && std::string{ (*it)["type"].GetString() } != std::string{ "SOLID" } && it->HasMember("visible") && (*it)["visible"].GetBool())
-		{
-			//auto type = std::string{ (*it)["type"].GetString() };
-			//auto visible = (*it)["visible"].GetBool();
-			return true;
-		}
-
-	return false;
-}
+//bool CheckElementHasGradient(rj::Value& element_json)
+//{
+//	if (!element_json.HasMember("fills"))
+//		return false;
+//
+//	const rj::Value& arrFills = element_json["fills"].GetArray();
+//
+//	for (auto it = arrFills.Begin(); it != arrFills.End(); it++)
+//		if (it->HasMember("type") && std::string{ (*it)["type"].GetString() } != std::string{ "SOLID" } && it->HasMember("visible") && (*it)["visible"].GetBool())
+//		{
+//			//auto type = std::string{ (*it)["type"].GetString() };
+//			//auto visible = (*it)["visible"].GetBool();
+//			return true;
+//		}
+//
+//	return false;
+//}
 
 
 bool SaveImagesVectorWithSuffixes(const TVecImages& vecImages, const std::string& strElementName, float scale, const auto& arrSuffixes)
@@ -107,7 +107,13 @@ bool SaveButton(ESliceFormat eFormat, const TVecImages& vecImages, const std::st
 }
 
 
-bool CImporter::Import(const std::string strElementName, rj::Value& elemJson, StbImage& image, ESliceFormat eFormat, ShadowBorder sBorder, float scale)
+//rj::Document CImporter::PrecomputeBorder(rj::Value& elementJson)
+//{
+//
+//}
+
+
+bool CImporter::Import(const std::string strElementName, rj::Value& elemJson, SStbImage& image, ESliceFormat eFormat, ShadowBorder sBorder, float scale)
 {
 	if (eFormat == ESliceFormat_Ignore)
 		return false;

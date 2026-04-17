@@ -10,8 +10,9 @@ class CImporter
 {
 protected:
 	static ShadowBorder GetReportHeaderSizes(rj::Value& element_json);
-	static StbImage StretchToExpectedSize(rj::Value& element_json, StbImage& image, ShadowBorder sBorder, float scale);
+	static SStbImage StretchToExpectedSize(rj::Value& element_json, SStbImage& image, ShadowBorder sBorder, float scale);
 
 public:
-	static bool Import(const std::string strElementName, rj::Value& elemJson, StbImage& image, ESliceFormat eFormat, ShadowBorder sBorder, float scale);
+	static bool Import(const std::string strElementName, rj::Value& elemJson, SStbImage& image, ESliceFormat eFormat, ShadowBorder sBorder, float scale);
+	//static rj::Document PrecomputeBorder(rj::Value& elementJson);
 };

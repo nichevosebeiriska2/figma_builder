@@ -4,163 +4,257 @@
 #include <regex>
 #include <execution>
 #include <algorithm>
+#include <error/en.h>
 #include <ranges>
+#include <format>
 
+rj::Document									CResourceManager::m_docProjectFile;
+rj::Document									CResourceManager::m_docLibraryFile;
 
-std::map<std::string, rj::Document>				CResourceManager::m_mapElementsJsons{};
-std::map<std::string, std::filesystem::path>	CResourceManager::m_mapElementImagePaths{};
-std::vector<float>								CResourceManager::m_vecImageScales{};
-std::vector<std::string>						CResourceManager::s_vecCanvases{};
-std::map<std::string, ShadowBorder>				CResourceManager::s_mapBorders{};
-CResourceManager::TVecImportParams				CResourceManager::s_vecParams{};
-TVecStr											CResourceManager::s_vecFiltersIgnore{};
-std::vector<std::regex>							CResourceManager::s_vecRegexFilter{};
+TVecStr											CResourceManager::s_vecCanvases{};
+TVecStr											CResourceManager::s_vecLibraryCanvases{};
+TVecStr											CResourceManager::s_vecStyleCanvases{};
+TVecStr											CResourceManager::s_vecLibraryStyleCanvases{};
+TVecRegex										CResourceManager::s_vecRegexFilter{};
 TVecFloat										CResourceManager::s_vecDefaultImageScales{ 1.0f };
-TMapVec<float>									CResourceManager::s_mapSpecificScales{};
+CResourceManager::TVecImportParams				CResourceManager::s_vecParams{};
 
-
-std::expected<rj::Document, std::string> CResourceManager::GetFile()
-{
-	const SHttpResponseData response = CurlGetFile();
-
-	if (response.status_code)
-		return  std::unexpected{ response.body };
-
-	rj::Document doc;
-	doc.Parse(response.body.c_str(), response.body.size());
-
-	if (doc.HasParseError())
-		return std::unexpected{ "GetFile() : failed to parse json" };
-
-	return std::move(doc);
-}
+CResourceManager::TMapShadowBorder				CResourceManager::s_mapBorders{};
+CResourceManager::TMapDocuments					CResourceManager::m_mapElementsJsons{};
+CResourceManager::TMapSpecificScales			CResourceManager::s_mapSpecificScales{};
 
 
 bool CResourceManager::SetIgnoreFilters(TVecStr& vecFiltersIgnore)
 {
-	if (std::ranges::any_of(vecFiltersIgnore, [](const auto& expr) {return !IsRegExValid(expr);}))
-		return false;
+	bool bSuccess = true;
 
-	s_vecFiltersIgnore = vecFiltersIgnore;
-
-	try
+	for (const auto& str : vecFiltersIgnore)
 	{
-		for (const auto& str : s_vecFiltersIgnore)
-			s_vecRegexFilter.emplace_back(std::regex(str));
+		s_vecRegexFilter.emplace_back(TryCreateRegex(str, bSuccess));
+		if (!bSuccess)
+			return false;
 	}
-	catch (std::regex_error)
+	
+	return true;
+}//CResourceManager::SetIgnoreFilters()
+
+
+bool CResourceManager::InitConfig()
+{
+	const std::filesystem::path pathToConfig = GetConfigFilePath();
+
+	if (!std::filesystem::exists(pathToConfig))
 	{
+		Logger::Log("failed to find info file. Please set info");
 		return false;
 	}
+
+	rj::Document docConfig = LoadJsonFromFile(pathToConfig);
+
+	if (docConfig.HasParseError())
+	{
+		rj::GetParseError_En(docConfig.GetParseError());
+		Logger::Error(std::format("Config '{}' has parse error \n\t error : '{}'\n\t offset '{}'"
+			, pathToConfig.generic_string()
+			, rj::GetParseError_En(docConfig.GetParseError())
+			, docConfig.GetErrorOffset()));
+
+		return false;
+	}
+
+	if (!docConfig.HasMember("token") || !docConfig["token"].IsString())
+	{
+		Logger::Error("LoadAccessParameters() - no 'token' field or field is not a string");
+		return false;
+	}
+
+	if (!docConfig.HasMember("file descriptor") || !docConfig["file descriptor"].IsString())
+	{
+		Logger::Error("LoadAccessParameters() - no 'file descriptor' field or field is not a string");
+		return false;
+	}
+
+	if (!docConfig.HasMember("library descriptor") || !docConfig["library descriptor"].IsString())
+	{
+		Logger::Error("LoadAccessParameters() - no 'library descriptor' field or field is not a string");
+		return false;
+	}
+
+	SetAccessToken(docConfig.HasMember("token") ? docConfig["token"].GetString() : "");
+	SetFileDescriptor(docConfig.HasMember("file descriptor") ? docConfig["file descriptor"].GetString() : "");
+	SetFileLibraryDescriptor(docConfig.HasMember("library descriptor") ? docConfig["library descriptor"].GetString() : "");
+
+	if (!docConfig.HasMember("import"))
+	{
+		Logger::Error("failed to load import settings from config");
+		return false;
+	}
+
+	const auto& objImport = docConfig["import"];
+	if (!objImport.HasMember("canvases"))
+	{
+		Logger::Error("failed to load 'canvases' array from config");
+		return false;
+	}
+
+	if (!objImport.HasMember("style canvases"))
+	{
+		Logger::Error("failed to load 'canvases' array from config");
+		return false;
+	}
+
+	if (!objImport.HasMember("library canvases"))
+	{
+		Logger::Error("failed to load 'canvases' array from config");
+		return false;
+	}
+
+	if (!objImport.HasMember("library style canvases"))
+	{
+		Logger::Error("failed to load 'library canvases' array from config");
+		return false;
+	}
+
+	if (!objImport.HasMember("image scales") || !objImport["image scales"].IsArray())
+	{
+		Logger::Error("Error : 'import' has no 'image scales' array");
+		return false;
+	}
+
+	if (!objImport.HasMember("borders"))
+	{
+		Logger::Error("No borderd in config");
+		return false;
+	}
+
+	if (!objImport.HasMember("task list"))
+	{
+		Logger::Error("No tasks in config");
+		return false;
+	}
+
+
+	if (objImport.HasMember("ignore"))
+	{
+		TVecStr vecStrFilters;
+		
+		if (!ParseJsonArrayAsStrings(objImport["ignore"], vecStrFilters))
+		{
+			Logger::Error("'ignore' - all filter must be string type", 2);
+			return false;
+		}
+
+		if (!CResourceManager::SetIgnoreFilters(vecStrFilters))
+		{
+			Logger::Error("invalid regular expression inside 'ignore'");
+			return false;
+		}
+	}
+
+	if (!ParseJsonArrayAsStrings(objImport["canvases"], s_vecCanvases))
+	{
+		Logger::Error("'canvases' - all elements must be string type", 2);
+		return false;
+	}
+
+	if (!ParseJsonArrayAsStrings(objImport["style canvases"], s_vecStyleCanvases))
+	{
+		Logger::Error("'style canvases' - all elements must be string type", 2);
+		return false;
+	}
+
+	if (!ParseJsonArrayAsStrings(objImport["library style canvases"], s_vecLibraryCanvases))
+	{
+		Logger::Error("'library canvases' - all elements must be string type", 2);
+		return false;
+	}
+
+	if (!ParseJsonArrayAsFloats(objImport["image scales"], s_vecDefaultImageScales))
+	{
+		Logger::Error("all scales have to be float type'");
+		return false;
+	}
+
+	if (objImport.HasMember("specific scales"))
+	{
+		const auto& arrSpecScales = objImport["specific scales"];
+		for (auto it = arrSpecScales.MemberBegin(); it != arrSpecScales.MemberEnd(); it++)
+			if (!ParseJsonArrayAsFloats(it->value, s_mapSpecificScales[it->name.GetString()]))
+			{
+				Logger::Error(std::format("specific scales for element '{}' - all scales have to be float type", it->name.GetString()), 2);
+				return false;
+			}
+	}
+
+
+	if (!CResourceManager::ParseBorders(objImport["borders"]))
+	{
+		Logger::Error("Failed to parser 'borders' list");
+		return false;
+	}
+
+	if (!CResourceManager::ParseTaskList(objImport["task list"]))
+	{
+		Logger::Error("Failed to parser 'task list'");
+		return false;
+	}
+
 
 	return true;
-}
-
-
-void CResourceManager::SetSpecificScales(TMapVec<float>& mapSpecificScales)
-{
-	s_mapSpecificScales = mapSpecificScales;
-}
-
-
-void CResourceManager::SetDefaultScales(TVecFloat& vecDefaultScales)
-{
-	s_vecDefaultImageScales = vecDefaultScales;
-}
-
-
-void CResourceManager::SetCanvases(TVecStr& vecCanvases)
-{
-	s_vecCanvases = vecCanvases;
-}
-
-
-std::optional<std::map<std::string, ShadowBorder>> ParseBordersImpl(const rj::Value& objBorders)
-{
-	if (!objBorders.IsObject())
-		return std::nullopt;
-
-	std::map<std::string, ShadowBorder> result;
-
-	for (auto it = objBorders.MemberBegin(); it != objBorders.MemberEnd(); it++)
-	{
-		if (!it->value.IsArray())
-			return std::nullopt;
-
-		auto vecValues = ParseJsonArrayAsInts(it->value);
-		
-		if (!vecValues || vecValues->size() != 4)
-			return std::nullopt;
-
-		result[it->name.GetString()] = ShadowBorder{  (float)(*vecValues)[0]
-													, (float)(*vecValues)[1]
-													, (float)(*vecValues)[2]
-													, (float)(*vecValues)[3] };
-	}
-
-	return result;
 }
 
 
 bool CResourceManager::ParseBorders(const rj::Value& objBorders)
 {
-	auto optBorders = ParseBordersImpl(objBorders);
-
-	if (!optBorders)
+	if (!objBorders.IsObject())
 		return false;
 
-	s_mapBorders = *optBorders;
+	for (auto it = objBorders.MemberBegin(); it != objBorders.MemberEnd(); it++)
+	{
+		if (!it->value.IsArray())
+			return false;
+
+		TVecInts vecInts;
+
+		if (!ParseJsonArrayAsInts(it->value, vecInts) || vecInts.size() != 4)
+			return false;
+
+		s_mapBorders[it->name.GetString()] = ShadowBorder{ (float)(vecInts)[0], (float)(vecInts)[1], (float)(vecInts)[2], (float)(vecInts)[3] };
+	}
 
 	return true;
-}
+}//CResourceManager::ParseBorders()
 
 
-std::optional<SImportParams> CResourceManager::ParseImportParams(const rj::Value& arrayParams)
+bool CResourceManager::ParseImportParams(const rj::Value& arrayParams, SImportParams& sParams)
 {
-	if (!arrayParams.IsArray() || arrayParams.Size() != 4)
+	TVecStr vecStrTaskParams;
+	if (!arrayParams.IsArray() || !ParseJsonArrayAsStrings(arrayParams, vecStrTaskParams) || vecStrTaskParams.size() != 4)
 	{
 		Logger::Error("Invalid import params size");
-		return std::nullopt;
+		return false;
 	}
 
-	auto optArrString = ParseJsonArrayAsStrings(arrayParams);
+	const ENodeType eType = StringToNodeType(vecStrTaskParams[0]);
+	const ESliceFormat eSliceFormat = StringToSliceFormat(vecStrTaskParams[2]);
 
-	if (!optArrString || (*optArrString).size() != 4)
-		return std::nullopt;
-
-	auto vecValues = *optArrString;
-	auto fnPrintError = [&]()
+	if (eType == _UNKNOWN || !s_mapBorders.contains(vecStrTaskParams[3]) || eSliceFormat == ESliceFormat_Unknown)
 	{
-		Logger::Error(std::format("failed to parse task with params : '[{}], [{}], [{}], [{}]'", vecValues[0], vecValues[1], vecValues[2], vecValues[3]));
-	};
-
-	auto eType = StringToNodeType(vecValues[0]);
-
-	if (eType == _UNKNOWN)
-	{
-		fnPrintError();
-		return std::nullopt;
+		Logger::Error(std::format("failed to parse task with params : '[{}], [{}], [{}], [{}]'", vecStrTaskParams[0], vecStrTaskParams[1], vecStrTaskParams[2], vecStrTaskParams[3]));
+		return false;
 	}
 
-	if (!s_mapBorders.contains(vecValues[3]))
+	bool bSuccess = true;
+	sParams = SImportParams{ eType, TryCreateRegex(vecStrTaskParams[1], bSuccess), eSliceFormat, s_mapBorders[vecStrTaskParams[3]] };
+
+	if (!bSuccess)
 	{
-		fnPrintError();
-		return std::nullopt;
+		Logger::Error(std::format("Invalid regex : {}", vecStrTaskParams[1]));
+		return false;
 	}
 
-	auto eSliceFormat = StringToSliceFormat(vecValues[2]);
-
-	if (eSliceFormat == ESliceFormat_Unknown)
-	{
-		fnPrintError();
-		return std::nullopt;
-	}
-
-	if (!IsRegExValid(vecValues[1]))
-		int a = 1;
-
-	return SImportParams{ eType, std::regex{vecValues[1]}, eSliceFormat, s_mapBorders[vecValues[3]] };
-}
+	return true;
+}//CResourceManager::ParseImportParams()
 
 
 bool CResourceManager::ParseTaskList(const rj::Value& arrayTasks)
@@ -169,89 +263,42 @@ bool CResourceManager::ParseTaskList(const rj::Value& arrayTasks)
 		return false;
 
 	for (auto it = arrayTasks.Begin(); it != arrayTasks.End(); it++)
-	{
-		if (!it->IsArray())
-			return false;
-
-		auto optTask = ParseImportParams(*it);
-
-		if (!optTask)
+		if (!it->IsArray() || !ParseImportParams(*it, s_vecParams.emplace_back()))
 		{
 			Logger::Error("Failed to parse task list");
 			return false;
 		}
 
-		s_vecParams.emplace_back(*optTask);
-	}
-
 	return true;
-}
+}//CResourceManager::ParseTaskList()
 
 
-std::optional<rj::Document> CResourceManager::GetRawFile()
+bool IsDifferentVersions(const rj::Document& docMetaFromApi, const rj::Document& docCurrentMeta)
 {
-	if (auto exp_file = GetFile())
-	{
-		CCacheManager::SaveFigmaFile(*exp_file);
-		return std::move(*exp_file);
-	}
+	const std::string strCachedVersion = docCurrentMeta["version"].GetString();
+	const std::string strApiFileVersion = docMetaFromApi["version"].GetString();
 
-	return std::nullopt;
-}
+	if(strCachedVersion != strApiFileVersion)
+		Logger::Log(std::format("Different version - cached : {}, actual : {}", strCachedVersion, strApiFileVersion));
+	
+	return strCachedVersion != strApiFileVersion;
+}//IsDifferentVersions()
 
 
-std::optional<rj::Document> CResourceManager::GetActualFile(bool bForceUpdate)
+bool CResourceManager::CheckLibraryFileNeedUpdate(rj::Document& docMeta)
 {
-	const bool bNeedUpdate = CheckFileNeedUpdate() || bForceUpdate;
-	auto opt_file = 
-		//bNeedUpdate ? CResourceManager::GetRawFile() : 
-		CCacheManager::TryGetProjectFile();
+	rj::Document docMetaCurrent = CCacheManager::TryGetProjectLibraryInfo();
 
-	if (!bNeedUpdate && !opt_file)
-		opt_file = CResourceManager::GetRawFile();
+	docMeta = CurlGetFileInfoAsJsonDocument();
 
-	if (!opt_file)
-		return std::nullopt;
-
-	return opt_file;
-}
-
-
-bool CResourceManager::CheckFileNeedUpdate()
-{
-	auto opt_cached_project_meta = CCacheManager::TryGetProjectInfo();
-
-	if (!opt_cached_project_meta)
+	if (docMetaCurrent.IsNull())
 	{
 		Logger::Log("Failed to find file meta-info. Updating...");
-
-		auto r = CurlGetFileInfo();
-
-		rj::Document doc(rj::kObjectType);
-		doc.Parse(r.body.c_str());
-
-		SaveJsonToFile(doc, GetCacheDirectory() / "file_meta.txt");
-
 		return true;
 	}
 
-	Logger::Log("Checking if project need to be updated...");
-	auto r = CurlGetFileInfo();
-
-	rj::Document doc(rj::kObjectType);
-	doc.Parse(r.body.c_str());
-
-	auto& meta = *opt_cached_project_meta;
-
-	const std::string strCachedVersion = meta["version"].GetString();
-	const std::string strApiFileVersion = doc["version"].GetString();
-
-	if (strCachedVersion != strApiFileVersion)
-	{
-		Logger::Log(std::format("Different version - cached : {}, actual : {}", strCachedVersion, strApiFileVersion));
-		SaveJsonToFile(doc, GetCacheDirectory() / "file_meta.txt");
+	if (IsDifferentVersions(docMeta, docMetaCurrent))
 		return true;
-	}
 
 	if (!CCacheManager::IsProjectFileExists())
 	{
@@ -259,59 +306,43 @@ bool CResourceManager::CheckFileNeedUpdate()
 		return true;
 	}
 
-	Logger::Log(std::format("project name : {}\nlast modified : {}\nversion : {}", doc["name"].GetString(), doc["lastModified"].GetString(), doc["version"].GetString()));
+	Logger::Log(std::format("project name : {}\nlast modified : {}\nversion : {}", docMetaCurrent["name"].GetString(), docMetaCurrent["lastModified"].GetString(), docMetaCurrent["version"].GetString()));
 	Logger::Log("No update needed. Running from cache");
 
 	return false;
-}
+}//CResourceManager::CheckLibraryFileNeedUpdate()
 
 
-bool CResourceManager::GetImageByIDs(IDs ids)
+
+bool CResourceManager::CheckFileNeedUpdate(rj::Document& docMeta)
 {
-	auto resp = CurlGetImage({ ids }, 1.0f, true);
+	rj::Document docMetaCurrent = CCacheManager::TryGetProjectInfo();
 
-	rj::Document docResp;
-	docResp.Parse(resp.body.c_str());
+	docMeta = CurlGetFileInfoAsJsonDocument();
 
-	if (docResp.HasParseError())
+	if (docMetaCurrent.IsNull())
 	{
-		Logger::Error(std::format("GatherImages() : CurlGetImage() returned invalid responce : {}", resp.body));
-		return false;
+		Logger::Log("Failed to find file meta-info. Updating...");
+		return true;
 	}
 
-	const auto& doc_images = docResp["images"].GetObject();
-	std::vector<DownloadTask> tasks;
-	const std::string strImageName = "image_requested";
+	if (IsDifferentVersions(docMeta, docMetaCurrent))
+		return true;
 
-	for (auto it_image = doc_images.MemberBegin(); it_image != doc_images.MemberEnd(); it_image++)
+	if (!CCacheManager::IsProjectFileExists())
 	{
-		auto req_ids = GetElementIDs(it_image->name.GetString());
-		const std::string& img_name = strImageName;
-
-		if (it_image->value.IsString())
-			tasks.emplace_back(it_image->value.GetString(), (GetImagesCacheDirectory() / (img_name + ".png")).generic_string());
-		else
-		{
-			Logger::Warning(std::format("failed to load image for element {} with ids '{}:{}'", img_name, req_ids.first, req_ids.second));
-			return false;
-		}
-
-		//}
+		Logger::Log("Failed to load cached project file. Updating...");
+		return true;
 	}
 
-	CurlDownloadImagesAsync(tasks);
+	Logger::Log(std::format("project name : {}\nlast modified : {}\nversion : {}", docMetaCurrent["name"].GetString(), docMetaCurrent["lastModified"].GetString(), docMetaCurrent["version"].GetString()));
+	Logger::Log("No update needed. Running from cache");
 
-	return true;
-}
-
-
-bool CResourceManager::IsNameIgnored(const std::string& strName)
-{
-	return std::ranges::any_of(s_vecRegexFilter, [&](const auto& regex) { return std::regex_match(strName, regex);});
-}
+	return false;
+}//CResourceManager::CheckFileNeedUpdate()
 
 
-void CResourceManager::GatherImageLinks(std::map<float, std::set<IDs>>& mapScaledIds, std::vector<SElementToGather>& vecElements)
+void CResourceManager::GatherImageLinks(TMapScaleSetIDs& mapScaledIds, std::vector<SElementToGather>& vecElements)
 {
 	std::vector<SHttpResponseData> responses;
 	std::map<float, std::vector<SHttpResponseData>> mapResponses;
@@ -339,7 +370,7 @@ void CResourceManager::GatherImageLinks(std::map<float, std::set<IDs>>& mapScale
 			}
 		}
 	}
-}
+}//CResourceManager::GatherImageLinks()
 
 
 void CResourceManager::GatherImages(std::vector<SElementToGather>& vecElements)
@@ -347,11 +378,9 @@ void CResourceManager::GatherImages(std::vector<SElementToGather>& vecElements)
 	// gathering all required scales for each element
 	std::map<float, std::set<IDs>> mapElementsWithScale;
 
-	auto lambda_get_ids = [](auto& elem) {return elem.m_ids;};
-
 	// insert images with default scales
 	for (const auto&scale : s_vecDefaultImageScales)
-		mapElementsWithScale[scale].insert_range(vecElements | std::views::transform(lambda_get_ids) | std::ranges::to<std::set>());
+		mapElementsWithScale[scale].insert_range(vecElements | std::views::transform([](auto& elem) {return elem.m_ids;}) | std::ranges::to<std::set>());
 
 	// insert images with specific scales from config
 	for (const auto& [strFilter, vecScales] : s_mapSpecificScales)
@@ -375,18 +404,14 @@ void CResourceManager::GatherImages(std::vector<SElementToGather>& vecElements)
 	// now gather images
 
 	auto lambda_create_scale_suffix = [](float scale) {return scale != 1.0f ? std::format("@{}x", scale) : "";};
-	std::vector<DownloadTask> tasks;
-	for (const auto& element : vecElements)
-	{
-		if (element.strName.find("button_fold") != element.strName.npos)
-			int a = 1;
 
+	std::vector<SDownloadTask> tasks;
+	for (const auto& element : vecElements)
 		for (auto& [scale, url] : element.m_mapLinksToScaledImages)
 		{
 			const std::string strOutputImageName = element.strName + lambda_create_scale_suffix(scale) + ".png";
 			tasks.emplace_back(url, (GetImagesCacheDirectory() / ToString(element.eType) / (strOutputImageName)).generic_string());
 		}
-	}
 
 	Logger::Success(std::format("downloading '{}' images ...", tasks.size()));
 
@@ -394,45 +419,57 @@ void CResourceManager::GatherImages(std::vector<SElementToGather>& vecElements)
 	CurlDownloadImagesAsync(tasks);
 
 	return;
-}
+}//CResourceManager::GatherImages()
+
+
+bool CResourceManager::GatherStyles()
+{	
+	TVecValuePtrs vecFrom;
+
+	FindNodesByNameAndType(m_docProjectFile, s_vecStyleCanvases, CANVAS, vecFrom);
+	FindNodesByNameAndType(m_docLibraryFile, s_vecLibraryStyleCanvases, CANVAS, vecFrom);
+
+	TVecValuePtrs textGuideFrames;
+
+	for (const auto& canvas : vecFrom)
+		FindNodesByNameAndType(*canvas, TVecStr{ "text_guide",  "text guide" }, FRAME, textGuideFrames);
+
+	TVecValuePtrs vecTextNodePtrs;
+
+	for (const TValue* pValueTextGuideFrame : textGuideFrames)
+		findNodesByType(*pValueTextGuideFrame, TEXT, vecTextNodePtrs);
+
+	rj::Document docStyles(rj::kArrayType);
+
+	for (const TValue* pTextNode : vecTextNodePtrs)
+		docStyles.PushBack(std::move(*const_cast<TValue*>(pTextNode)), docStyles.GetAllocator());
+	
+	SaveJsonToFile(docStyles, GetOutputDirectory() / "styles.txt");
+	
+	return true;
+}//CResourceManager::GatherStyles()
 
 
 bool CResourceManager::GatherGraphicalElements()
 {
-	if (CheckFileNeedUpdate())
-		Logger::Warning("File is out of date. Run with '-update' if you want to update it");
-	
-	auto opt_file = CCacheManager::TryGetProjectFile();
-
-	if (!opt_file)
-	{
-		Logger::Error("Failed to get file from cache. No file found. Try run utility with '-update'");
-		return false;
-	}
-
 	Logger::Success("Project file parsed", 1);
-		
-	auto& file = *opt_file;
 
-	std::vector<rj::Value*> result;
+	TVecValuePtrs vecValuePtrFromComponents;
+	TVecValuePtrs vecValueCanvases;
+
+	FindNodesByNameAndType(m_docProjectFile, s_vecCanvases, CANVAS, vecValueCanvases);
 	
-
-	std::vector<const rj::Value*> graphical_elements_from_components;
-	std::vector<rj::Value*> vecFrom;
-
-	for(auto& strCanvas : s_vecCanvases)
-		findNodesByNameAndType(file, strCanvas, CANVAS, vecFrom);
-	
-	if (vecFrom.empty())
+	if (vecValueCanvases.empty())
 	{
 		Logger::Error("No canvases to find elements in. Error");
 		return false;
 	}
-	for(auto& canvas : vecFrom)
-		findElementNodesFromExportDev(*canvas, graphical_elements_from_components);
+
+	for(const TValue* pValueCanvas : vecValueCanvases)
+		FindElementsFromComponents(*pValueCanvas, vecValuePtrFromComponents);
 
 
-	if (graphical_elements_from_components.empty())
+	if (vecValuePtrFromComponents.empty())
 	{
 		Logger::Error("Failed to find graphical elements. Error", 2);
 		return false;
@@ -440,18 +477,16 @@ bool CResourceManager::GatherGraphicalElements()
 
 	std::vector<SElementToGather> vecElementsToGather;
 
-	for (auto* elem : graphical_elements_from_components)
+	for (const TValue* pValue : vecValuePtrFromComponents)
 	{
-		if (IsNameIgnored((*elem)["name"].GetString()))
+		const bool bNameIgnored = std::ranges::any_of(s_vecRegexFilter, [&](const auto& regex) { return std::regex_match((*pValue)["name"].GetString(), regex);});
+		if (bNameIgnored)
 			continue;
-		//elem
-		CCacheManager::SaveBuildElementJson(*elem);
-		auto type = StringToNodeType((*elem)["type"].GetString());
-
-		vecElementsToGather.emplace_back(type, (*elem)["name"].GetString(), GetElementIDs((*elem)["id"].GetString()), elem );
+		
+		CCacheManager::SaveBuildElementJson(*pValue);
+		const std::string strElementName = (*pValue)["type"].GetString();
+		vecElementsToGather.emplace_back(StringToNodeType(strElementName), strElementName, GetElementIDs((*pValue)["id"].GetString()), pValue);
 	}
-
-	std::map<std::string, IDs> m_mapNameIds; // for gather images;
 
 	GatherImages(vecElementsToGather);
 
@@ -459,60 +494,109 @@ bool CResourceManager::GatherGraphicalElements()
 }
 
 
-bool CResourceManager::UpdateProjectFile()
+bool CResourceManager::UpdateProjectLibraryFile()
 {
-	if (!CheckFileNeedUpdate())
+	rj::Document docMetaFileFromApi;
+	bool bFileNeedUpdate = CheckLibraryFileNeedUpdate(docMetaFileFromApi);
+	bool bLibFileExists = CCacheManager::IsLibraryFileExists();
+
+	if (!bFileNeedUpdate && bLibFileExists)
 	{
-		Logger::Success("File is up to date. No update needed");
+		// nothing to save
+		Logger::Success("Library file is up to date. No update needed");
 		return true;
 	}
-	else
-	{
-		Logger::Log("Trying to get file with figma API ...", 1);
-		auto opt_file = GetRawFile();
 
-		if (!opt_file)
+	if (!bLibFileExists || bFileNeedUpdate) // if there is no library file - download it
+	{
+		Logger::Log("Trying to get library file with figma API ...", 1);
+		rj::Document docLibraryFile = CurlGetLibraryFile();
+
+		if (docLibraryFile.IsNull())
 		{
 			Logger::Error("Failed to get file from API. Error.", 2);
 			return false;
 		}
 
-		Logger::Success("Figma project file successfully saved to cache.");
+		CCacheManager::SaveFigmaLibraryFile(docLibraryFile);
+		Logger::Success("Figma library project file successfully saved to cache.");
+	}
+
+	// library file successfully updated yet. save lib meta file
+	CCacheManager::SaveFigmaLibraryFileMeta(docMetaFileFromApi);
+	return true;
+}
+
+
+bool CResourceManager::UpdateProjectFile()
+{
+	rj::Document docMetaFileFromApi;
+	bool bFileNeedUpdate = CheckFileNeedUpdate(docMetaFileFromApi);
+	bool bLibFileExists = CCacheManager::IsProjectFileExists();
+
+	if (!bFileNeedUpdate && bLibFileExists)
+	{
+		// nothing to save
+		Logger::Success("Project file is up to date. No update needed");
 		return true;
 	}
 
+	if (!bLibFileExists || bFileNeedUpdate) // if there is no library file - download it
+	{
+		Logger::Log("Trying to get file with figma API ...", 1);
+		rj::Document docFile = CurlGetFile();
 
-	return false;
+		if (docFile.IsNull())
+		{
+			Logger::Error("Failed to get file from API. Error.", 2);
+			return false;
+		}
+
+		CCacheManager::SaveFigmaFile(docFile);
+		Logger::Success("Figma project file successfully saved to cache.");
+	}
+
+	// project file successfully updated yet. save lib meta file
+	CCacheManager::SaveFigmaFileMeta(docMetaFileFromApi);
+	return true;
 }
 
 
-SImportParams CResourceManager::GuessImportParams(const ENodeType eType,const std::string& strElementName)
+bool CResourceManager::Update()
 {
-	try
-	{
+	return UpdateProjectLibraryFile() && UpdateProjectFile();
+}
 
-		for (const auto& [eNodeType, str_regexp, fmt, fmt_border] : s_vecParams)
-		{
-			//auto regexp = std::regex(str_regexp);
-			try
-			{
-				if (eType == eNodeType && std::regex_search(strElementName, str_regexp))
-					return { eNodeType, str_regexp, fmt, fmt_border };
-			}
-			catch (...)
-			{
-				int a = 1;
-			}
-		}
-	}
-	catch (...)
+
+bool CResourceManager::Gather()
+{
+	if (!CResourceManager::Update())
 	{
-		int a = 1;
+		Logger::Error("Failed to update project files");
+		return false;
 	}
+
+	m_docLibraryFile = CCacheManager::TryGetLibraryFile();
+	m_docProjectFile = CCacheManager::TryGetProjectFile();
+
+	if (m_docProjectFile.IsNull() || m_docLibraryFile.IsNull())
+	{
+		Logger::Error("Failed to initialize project/library file");
+		return false;
+	}
+
+	return GatherStyles() && GatherGraphicalElements();
+}//CResourceManager::Gather()
+
+
+CResourceManager::SImportParams CResourceManager::GuessImportParams(const ENodeType eType,const std::string& strElementName)
+{
+	for (const auto& [eNodeType, strRegexp, fmt, fmt_border] : s_vecParams)
+		if (eType == eNodeType && std::regex_search(strElementName, strRegexp))
+			return { eNodeType, strRegexp, fmt, fmt_border };
 
 	return SImportParams{};
-}
-
+}//CResourceManager::GuessImportParams()
 
 
 void CResourceManager::BuildElementsFromCache()
@@ -523,74 +607,40 @@ void CResourceManager::BuildElementsFromCache()
 	UINT iErrorElements		= 0;
 	UINT iIgnoredElements	= 0;
 
-	auto lambda_build_elem_with_scale = [&](const std::string& name, rj::Value& json, float scale) {
-
-		if (name.find("grid_header_left") != name.npos)
-			int a = 1;
+	auto lambdaBuildElemWithScale = [&](const std::string& name, rj::Value& json, float scale) {
 
 			const ENodeType eType = StringToNodeType(json["type"].GetString());
-			auto opt_image = CCacheManager::FindElementImage(name, eType, scale);
+			TPtrImage pImage = CCacheManager::FindElementImage(name, eType, scale);
 
-			
-			if (!opt_image)
-			{
+			if (!pImage)
 				iErrorElements++;
-				//Logger::Warning(std::format("failed to load image for element [name : [{}], type : [{}], scale : [{}]]", name, ToString(eType), scale));
-				
-			}
 			else
 			{
-				auto [type, strRegExp, slice_fmt, border_fmt] = GuessImportParams(eType, name);
+				SImportParams sParams = GuessImportParams(eType, name);
 
-				if (slice_fmt != ESliceFormat_Ignore && type != _UNKNOWN)
-				{
-					if (CImporter::Import(name, json, *opt_image, slice_fmt, border_fmt, scale)) {
-						iBuildedElements++;
-						//Logger::Success(std::format("for element [name : [{}], type : [{}], scale : [{}]] import format guessed", name, ToString(eType), scale));
-					}
-
-					else
-					{
-						iErrorElements++;
-						//Logger::Error(std::format("failed to import element [name : [{}], type : [{}], scale : [{}]", name, ToString(eType), scale));
-					}
-				}
-				else
-					iIgnoredElements++;
+				CImporter::Import(name, json, *pImage, sParams.m_eSliceFormat, sParams.m_sBorder, scale);
 			}
 		};
 
-	auto lambda_build_elem = [&](auto& elem) {
+	auto lambdaBuildElem = [&](auto& pairNameJson) {
+		auto& [strElementName, docElementJson] = pairNameJson;
 
-		auto& [name, json] = elem;
 		auto lambda_filter = [&](const std::string& strElementName, const std::string& strFilter) {
-				return std::regex_match(strElementName, std::regex(strFilter));
-			};
-
-		for (auto& [filter, vecScales] : s_mapSpecificScales)
-		{
-			if (lambda_filter(name, filter))
-				for(auto& scale : vecScales)
-					lambda_build_elem_with_scale(name, json, scale);
-
-		}
-
-		for(auto& scale : s_vecDefaultImageScales)
-			lambda_build_elem_with_scale(name, json, scale);
-		
+			return std::regex_match(strElementName, std::regex(strFilter));
 		};
 
-	for (auto& [node_type, mapElementsOfthisType] : mapElement)
-		std::for_each(std::execution::par, std::begin(mapElementsOfthisType), std::end(mapElementsOfthisType), lambda_build_elem);
+		// build with specific scale
+		for (auto& [strFilter, vecScales] : s_mapSpecificScales)
+			if (lambda_filter(strElementName, strFilter))
+				for(auto& fScale : vecScales)
+					lambdaBuildElemWithScale(strElementName, docElementJson, fScale);
 
-	Logger::Log(
-	std::format(
-		R"(
-	Statistics : 
-		Builded : {}
-		Ignored : {}
-		Failed : {}
-		)", iBuildedElements, iIgnoredElements, iErrorElements)
-		, 1
-	);
+		//build with default scale
+		for(const float fScale : s_vecDefaultImageScales)
+			lambdaBuildElemWithScale(strElementName, docElementJson, fScale);
+		
+	};
+
+	for (auto& [eNodeType, mapElementsOfthisType] : mapElement)
+		std::for_each(std::execution::par, std::begin(mapElementsOfthisType), std::end(mapElementsOfthisType), lambdaBuildElem);
 }

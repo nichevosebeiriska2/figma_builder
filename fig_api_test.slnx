@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="fig_api_test/fig_api_test.vcxproj" Id="793abeb8-fe20-49bf-8a99-b2f3fc61a04c" />
+</Solution>
