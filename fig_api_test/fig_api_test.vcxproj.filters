@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Исходные файлы">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Файлы заголовков">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Файлы ресурсов">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild">
+      <UniqueIdentifier>{d07eb0da-63ba-46a4-8de9-0634607dc65f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\Lists">
+      <UniqueIdentifier>{3a965fb1-e66e-400b-9769-072bcbc353de}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\global">
+      <UniqueIdentifier>{f0efc315-23cb-46d4-9577-ab6f6f635dbe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\utilities">
+      <UniqueIdentifier>{d347a2eb-d9cb-41aa-a183-d06053feae85}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\utilities\api">
+      <UniqueIdentifier>{61a59234-e5b0-4a2c-b18c-9b2842d8aa77}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\utilities\json_utils">
+      <UniqueIdentifier>{964cad38-49dc-456f-849d-122e06cb084c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\BuildComponents">
+      <UniqueIdentifier>{75a36362-eec0-45b5-819f-c6b469b89e91}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\autobuild\utilities\image_utils">
+      <UniqueIdentifier>{207f4530-5aa0-45d5-b725-d2adb1db3868}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\import">
+      <UniqueIdentifier>{83a5ae0d-d368-4ed2-8e5e-1cbadde162ba}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\src\api\api_utils.cpp">
+      <Filter>Исходные файлы\autobuild\utilities\api</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\utils\json_utils.cpp">
+      <Filter>Исходные файлы\autobuild\utilities\json_utils</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\global\global.cpp">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\utils\image_utils.cpp">
+      <Filter>Исходные файлы\autobuild\utilities\image_utils</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+      <Filter>Исходные файлы\Lists</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\import\import.cpp">
+      <Filter>Исходные файлы\import</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\api\ApiWrapper.cpp">
+      <Filter>Исходные файлы\autobuild\utilities\api</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\global\CCacheManager.cpp">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\global\CLogger.cpp">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\src\api\api_utils.h">
+      <Filter>Исходные файлы\autobuild\utilities\api</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\utils\json_utils.h">
+      <Filter>Исходные файлы\autobuild\utilities\json_utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\global\global.h">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\utils\image_utils.h">
+      <Filter>Исходные файлы\autobuild\utilities\image_utils</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\import\import.h">
+      <Filter>Исходные файлы\import</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\api\ApiWrapper.h">
+      <Filter>Исходные файлы\autobuild\utilities\api</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\global\CCacheManager.h">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\global\CLogger.h">
+      <Filter>Исходные файлы\autobuild\global</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

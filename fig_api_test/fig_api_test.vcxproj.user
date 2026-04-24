@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LocalDebuggerCommandArguments>-build_from_cache</LocalDebuggerCommandArguments>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+    <LocalDebuggerCommandArgumentsHistory>-get RECTANGLE bg_card_3x3|-get RECTANGLE button_stuff_accent_big_hover_3x1|-update|-gather|-build_from_cache|</LocalDebuggerCommandArgumentsHistory>
+    <LocalDebuggerWorkingDirectory>C:\\</LocalDebuggerWorkingDirectory>
+  </PropertyGroup>
+</Project>
