@@ -24,6 +24,7 @@
     <ProjectGuid>{793abeb8-fe20-49bf-8a99-b2f3fc61a04c}</ProjectGuid>
     <RootNamespace>figapitest</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>figma_builder</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
